@@ -565,3 +565,21 @@ config PRIME_NUMBERS
 	tristate
 
 endmenu
+
+config LIB_ASHLDI3
+	def_bool n
+
+config LIB_ASHRDI3
+	def_bool n
+
+config LIB_LSHRDI3
+	def_bool n
+
+config LIB_MULDI3
+	def_bool n
+
+config LIB_CMPDI2
+	def_bool n
+
+config LIB_UCMPDI2
+	def_bool n
