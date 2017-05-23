@@ -1,6 +1,6 @@
 #include <linux/export.h>
 
-#include "libgcc.h"
+#include <lib/libgcc.h>
 
 word_type notrace __cmpdi2(long long a, long long b)
 {
