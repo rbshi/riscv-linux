@@ -69,7 +69,7 @@ void __init time_init(void)
 	cpu = of_find_node_by_path("/cpus");
 	if (!cpu || of_property_read_u32(cpu, "timebase-frequency", &prop))
 		panic(KERN_WARNING "RISC-V system with no 'timebase-frequency' in DTS\n");
-	riscv_timebase = prop;
+	riscv_timebase = prop << 1; // hack to go from 1.6 GHz -> 3.2 without rebuilding FPGA
 
 	lpj_fine = riscv_timebase / HZ;
 
