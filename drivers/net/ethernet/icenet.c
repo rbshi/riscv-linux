@@ -286,12 +286,9 @@ static int icenet_parse_irq(struct net_device *ndev)
 			IRQF_SHARED | IRQF_NO_THREAD,
 			ICENET_NAME, ndev);
 	if (err) {
-		devm_free_irq(dev, nic->tx_irq, ICENET_NAME);
 		dev_err(dev, "could not obtain RX irq %d\n", nic->rx_irq);
 		return err;
 	}
-
-	set_intmask(nic, ICENET_INTMASK_BOTH);
 
 	return 0;
 }
@@ -305,8 +302,8 @@ static int icenet_open(struct net_device *ndev)
 	alloc_recv(ndev);
 	spin_unlock_irqrestore(&nic->rx_lock, flags);
 
-	icenet_parse_irq(ndev);
 	netif_start_queue(ndev);
+	set_intmask(nic, ICENET_INTMASK_BOTH);
 
 	printk(KERN_DEBUG "IceNet: opened device\n");
 
@@ -317,10 +314,8 @@ static int icenet_stop(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 
-	netif_stop_queue(ndev);
-	devm_free_irq(nic->dev, nic->tx_irq, ICENET_NAME);
-	devm_free_irq(nic->dev, nic->rx_irq, ICENET_NAME);
 	clear_intmask(nic, ICENET_INTMASK_BOTH);
+	netif_stop_queue(ndev);
 
 	printk(KERN_DEBUG "IceNet: stopped device\n");
 	return 0;
@@ -396,6 +391,9 @@ static int icenet_probe(struct platform_device *pdev)
 		dev_err(dev, "Failed to register netdev\n");
 		return ret;
 	}
+
+	if ((ret = icenet_parse_irq(ndev)) < 0)
+		return ret;
 
 	printk(KERN_INFO "Registered IceNet NIC %02x:%02x:%02x:%02x:%02x:%02x\n",
 			ndev->dev_addr[0],
