@@ -103,16 +103,16 @@ static inline int recv_comp_avail(struct icenet_device *nic)
 	return (ioread16(nic->iomem + ICENET_COUNTS) >> 12) & 0xf;
 }
 
-static inline void set_intmask(struct icenet_device *nic, char mask)
+static inline void set_intmask(struct icenet_device *nic, uint32_t mask)
 {
-	int oldmask = ioread8(nic->iomem + ICENET_INTMASK);
-	iowrite8(oldmask | mask, nic->iomem + ICENET_INTMASK);
+	atomic_t *mem = nic->iomem + ICENET_INTMASK;
+	atomic_fetch_or(mask, mem);
 }
 
-static inline void clear_intmask(struct icenet_device *nic, char mask)
+static inline void clear_intmask(struct icenet_device *nic, uint32_t mask)
 {
-	int oldmask = ioread8(nic->iomem + ICENET_INTMASK);
-	iowrite8(oldmask & ~mask, nic->iomem + ICENET_INTMASK);
+	atomic_t *mem = nic->iomem + ICENET_INTMASK;
+	atomic_fetch_and(~mask, mem);
 }
 
 static inline void post_send(
