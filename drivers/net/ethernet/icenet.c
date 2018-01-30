@@ -166,8 +166,10 @@ static void complete_send(struct net_device *ndev)
 		ndev->stats.tx_packets++;
 		ndev->stats.tx_bytes += skb->len;
 		dev_consume_skb_irq(skb);
-		netif_wake_queue(ndev);
 	}
+
+	clear_intmask(nic, ICENET_INTMASK_TX);
+	netif_wake_queue(ndev);
 }
 
 static void complete_recv(struct net_device *ndev)
@@ -303,7 +305,7 @@ static int icenet_open(struct net_device *ndev)
 	spin_unlock_irqrestore(&nic->rx_lock, flags);
 
 	netif_start_queue(ndev);
-	set_intmask(nic, ICENET_INTMASK_BOTH);
+	set_intmask(nic, ICENET_INTMASK_RX);
 
 	printk(KERN_DEBUG "IceNet: opened device\n");
 
@@ -331,8 +333,10 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	skb_tx_timestamp(skb);
 	post_send(nic, skb);
 
-	if (unlikely(!can_send(nic)))
+	if (unlikely(!can_send(nic))) {
+		set_intmask(nic, ICENET_INTMASK_TX);
 		netif_stop_queue(ndev);
+	}
 
 	spin_unlock_irqrestore(&nic->tx_lock, flags);
 
