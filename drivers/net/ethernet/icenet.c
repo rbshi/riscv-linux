@@ -23,6 +23,10 @@
 #define ICENET_MACADDR 24
 #define ICENET_INTMASK 32
 
+#define ICENET_INTMASK_TX 1
+#define ICENET_INTMASK_RX 2
+#define ICENET_INTMASK_BOTH 3
+
 #define CIRC_BUF_LEN 16
 #define ALIGN_BYTES 8
 #define ALIGN_MASK 0x7
@@ -287,7 +291,7 @@ static int icenet_parse_irq(struct net_device *ndev)
 		return err;
 	}
 
-	set_intmask(nic, 0x3);
+	set_intmask(nic, ICENET_INTMASK_BOTH);
 
 	return 0;
 }
@@ -312,12 +316,11 @@ static int icenet_open(struct net_device *ndev)
 static int icenet_stop(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
-	unsigned long flags;
 
 	netif_stop_queue(ndev);
 	devm_free_irq(nic->dev, nic->tx_irq, ICENET_NAME);
 	devm_free_irq(nic->dev, nic->rx_irq, ICENET_NAME);
-	clear_intmask(nic, 0x3);
+	clear_intmask(nic, ICENET_INTMASK_BOTH);
 
 	printk(KERN_DEBUG "IceNet: stopped device\n");
 	return 0;
