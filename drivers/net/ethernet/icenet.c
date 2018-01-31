@@ -27,7 +27,7 @@
 #define ICENET_INTMASK_RX 2
 #define ICENET_INTMASK_BOTH 3
 
-#define CIRC_BUF_LEN 16
+#define CIRC_BUF_LEN 64
 #define ALIGN_BYTES 8
 #define ALIGN_MASK 0x7
 #define ALIGN_SHIFT 3
