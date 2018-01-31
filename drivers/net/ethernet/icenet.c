@@ -167,9 +167,6 @@ static void complete_send(struct net_device *ndev)
 		ndev->stats.tx_bytes += skb->len;
 		dev_consume_skb_irq(skb);
 	}
-
-	clear_intmask(nic, ICENET_INTMASK_TX);
-	netif_wake_queue(ndev);
 }
 
 static void complete_recv(struct net_device *ndev)
@@ -220,6 +217,8 @@ static irqreturn_t icenet_tx_isr(int irq, void *data)
 	spin_lock(&nic->tx_lock);
 
 	complete_send(ndev);
+	clear_intmask(nic, ICENET_INTMASK_TX);
+	netif_wake_queue(ndev);
 
 	spin_unlock(&nic->tx_lock);
 
