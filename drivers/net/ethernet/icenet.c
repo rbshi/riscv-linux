@@ -27,6 +27,7 @@
 #define ICENET_INTMASK_RX 2
 #define ICENET_INTMASK_BOTH 3
 
+#define NAPI_RX_BUDGET 64
 #define CIRC_BUF_LEN 64
 #define ALIGN_BYTES 8
 #define ALIGN_MASK 0x7
@@ -75,6 +76,7 @@ static inline struct sk_buff *sk_buff_cq_pop(struct sk_buff_cq *cq)
 struct icenet_device {
 	struct device *dev;
 	void __iomem *iomem;
+	struct napi_struct napi;
 	struct sk_buff_cq send_cq;
 	struct sk_buff_cq recv_cq;
 	spinlock_t tx_lock;
@@ -169,13 +171,16 @@ static void complete_send(struct net_device *ndev)
 	}
 }
 
-static void complete_recv(struct net_device *ndev)
+static int complete_recv(struct net_device *ndev, int budget)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	struct sk_buff *skb;
-	int len;
+	int len, i, n = recv_comp_avail(nic);
 
-	while (recv_comp_avail(nic) > 0) {
+	if (n > budget)
+		n = budget;
+
+	for (i = 0; i < n; i++) {
 		len = ioread16(nic->iomem + ICENET_RECV_COMP);
 		skb = sk_buff_cq_pop(&nic->recv_cq);
 		skb_put(skb, len);
@@ -185,11 +190,13 @@ static void complete_recv(struct net_device *ndev)
 		skb->protocol = eth_type_trans(skb, ndev);
 		ndev->stats.rx_packets++;
 		ndev->stats.rx_bytes += len;
-		netif_rx(skb);
+		netif_receive_skb(skb);
 
 //		printk(KERN_DEBUG "IceNet: rx addr=%p, len=%d\n",
 //				skb->data, len);
 	}
+
+	return n;
 }
 
 static void alloc_recv(struct net_device *ndev)
@@ -233,14 +240,36 @@ static irqreturn_t icenet_rx_isr(int irq, void *data)
 	if (irq != nic->rx_irq)
 		return IRQ_NONE;
 
+	clear_intmask(nic, ICENET_INTMASK_RX);
+
+	if (likely(napi_schedule_prep(&nic->napi)))
+		__napi_schedule(&nic->napi);
+
+	return IRQ_HANDLED;
+}
+
+static int icenet_rx_poll(struct napi_struct *napi, int budget)
+{
+	struct icenet_device *nic;
+	struct net_device *ndev;
+	int completed;
+
+	nic = container_of(napi, struct icenet_device, napi);
+	ndev = dev_get_drvdata(nic->dev);
+
 	spin_lock(&nic->rx_lock);
 
-	complete_recv(ndev);
+	completed = complete_recv(ndev, budget);
 	alloc_recv(ndev);
 
 	spin_unlock(&nic->rx_lock);
 
-	return IRQ_HANDLED;
+	if (completed < budget) {
+		napi_complete(napi);
+		set_intmask(nic, ICENET_INTMASK_RX);
+	}
+
+	return completed;
 }
 
 static int icenet_parse_addr(struct net_device *ndev)
@@ -305,6 +334,7 @@ static int icenet_open(struct net_device *ndev)
 
 	netif_start_queue(ndev);
 	set_intmask(nic, ICENET_INTMASK_RX);
+	napi_enable(&nic->napi);
 
 	printk(KERN_DEBUG "IceNet: opened device\n");
 
@@ -315,6 +345,8 @@ static int icenet_stop(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 
+	napi_synchronize(&nic->napi);
+	napi_disable(&nic->napi);
 	clear_intmask(nic, ICENET_INTMASK_BOTH);
 	netif_stop_queue(ndev);
 
@@ -378,6 +410,8 @@ static int icenet_probe(struct platform_device *pdev)
 	nic = netdev_priv(ndev);
 	nic->dev = dev;
 
+	netif_napi_add(ndev, &nic->napi, icenet_rx_poll, NAPI_RX_BUDGET);
+
 	ether_setup(ndev);
 	ndev->flags &= ~IFF_MULTICAST;
 	ndev->netdev_ops = &icenet_ops;
@@ -412,8 +446,14 @@ static int icenet_probe(struct platform_device *pdev)
 static int icenet_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev;
+	struct icenet_device *nic;
+
 	ndev = platform_get_drvdata(pdev);
+	nic = netdev_priv(ndev);
+
+	netif_napi_del(&nic->napi);
 	unregister_netdev(ndev);
+
 	return 0;
 }
 
