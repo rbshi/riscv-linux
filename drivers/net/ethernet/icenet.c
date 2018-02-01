@@ -199,18 +199,20 @@ static int complete_recv(struct net_device *ndev, int budget)
 	return n;
 }
 
-static void alloc_recv(struct net_device *ndev)
+static int alloc_recv(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	int hw_recv_cnt = recv_req_avail(nic);
 	int sw_recv_cnt = SK_BUFF_CQ_SPACE(nic->recv_cq);
-	int recv_cnt = (hw_recv_cnt < sw_recv_cnt) ? hw_recv_cnt : sw_recv_cnt;
+	int i, n = (hw_recv_cnt < sw_recv_cnt) ? hw_recv_cnt : sw_recv_cnt;
 
-	for ( ; recv_cnt > 0; recv_cnt--) {
+	for (i = 0; i < n; i++) {
 		struct sk_buff *skb;
 		skb = netdev_alloc_skb(ndev, MAX_FRAME_SIZE);
 		post_recv(nic, skb);
 	}
+
+	return n;
 }
 
 static irqreturn_t icenet_tx_isr(int irq, void *data)
@@ -252,7 +254,7 @@ static int icenet_rx_poll(struct napi_struct *napi, int budget)
 {
 	struct icenet_device *nic;
 	struct net_device *ndev;
-	int completed;
+	int completed, allocated;
 
 	nic = container_of(napi, struct icenet_device, napi);
 	ndev = dev_get_drvdata(nic->dev);
@@ -260,9 +262,11 @@ static int icenet_rx_poll(struct napi_struct *napi, int budget)
 	spin_lock(&nic->rx_lock);
 
 	completed = complete_recv(ndev, budget);
-	alloc_recv(ndev);
+	allocated = alloc_recv(ndev);
 
 	spin_unlock(&nic->rx_lock);
+
+	BUG_ON(allocated != completed);
 
 	if (completed < budget) {
 		napi_complete(napi);
