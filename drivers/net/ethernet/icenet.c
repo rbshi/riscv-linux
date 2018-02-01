@@ -27,6 +27,7 @@
 #define ICENET_INTMASK_RX 2
 #define ICENET_INTMASK_BOTH 3
 
+#define TX_THRESHOLD 64
 #define NAPI_RX_BUDGET 64
 #define CIRC_BUF_LEN 64
 #define ALIGN_BYTES 8
@@ -147,12 +148,12 @@ static inline void post_recv(
 	sk_buff_cq_push(&nic->recv_cq, skb);
 }
 
-static inline int can_send(struct icenet_device *nic)
+static inline int send_space(struct icenet_device *nic)
 {
 	int avail = send_req_avail(nic);
 	int space = SK_BUFF_CQ_SPACE(nic->send_cq);
 
-	return avail > 0 && space > 0;
+	return (avail < space) ? avail : space;
 }
 
 static void complete_send(struct net_device *ndev)
@@ -370,8 +371,10 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	skb_tx_timestamp(skb);
 	post_send(nic, skb);
 
-	set_intmask(nic, ICENET_INTMASK_TX);
-	if (unlikely(!can_send(nic)))
+	if (send_space(nic) < TX_THRESHOLD)
+		set_intmask(nic, ICENET_INTMASK_TX);
+
+	if (unlikely(send_space(nic) == 0))
 		netif_stop_queue(ndev);
 
 	spin_unlock_irqrestore(&nic->tx_lock, flags);
