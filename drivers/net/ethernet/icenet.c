@@ -227,7 +227,9 @@ static irqreturn_t icenet_tx_isr(int irq, void *data)
 
 	complete_send(ndev);
 	clear_intmask(nic, ICENET_INTMASK_TX);
-	netif_wake_queue(ndev);
+
+	if (unlikely(netif_queue_stopped(ndev)))
+		netif_wake_queue(ndev);
 
 	spin_unlock(&nic->tx_lock);
 
@@ -337,8 +339,8 @@ static int icenet_open(struct net_device *ndev)
 	spin_unlock_irqrestore(&nic->rx_lock, flags);
 
 	netif_start_queue(ndev);
-	set_intmask(nic, ICENET_INTMASK_RX);
 	napi_enable(&nic->napi);
+	set_intmask(nic, ICENET_INTMASK_RX);
 
 	printk(KERN_DEBUG "IceNet: opened device\n");
 
@@ -349,9 +351,9 @@ static int icenet_stop(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 
+	clear_intmask(nic, ICENET_INTMASK_BOTH);
 	napi_synchronize(&nic->napi);
 	napi_disable(&nic->napi);
-	clear_intmask(nic, ICENET_INTMASK_BOTH);
 	netif_stop_queue(ndev);
 
 	printk(KERN_DEBUG "IceNet: stopped device\n");
@@ -368,10 +370,9 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	skb_tx_timestamp(skb);
 	post_send(nic, skb);
 
-	if (unlikely(!can_send(nic))) {
-		set_intmask(nic, ICENET_INTMASK_TX);
+	set_intmask(nic, ICENET_INTMASK_TX);
+	if (unlikely(!can_send(nic)))
 		netif_stop_queue(ndev);
-	}
 
 	spin_unlock_irqrestore(&nic->tx_lock, flags);
 
