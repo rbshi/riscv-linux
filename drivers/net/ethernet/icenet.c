@@ -197,12 +197,18 @@ static int complete_recv(struct net_device *ndev, int budget)
 	return n;
 }
 
-static int alloc_recv(struct net_device *ndev)
+static int alloc_recv(struct net_device *ndev, int n)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	int hw_recv_cnt = recv_req_avail(nic);
 	int sw_recv_cnt = SK_BUFF_CQ_SPACE(nic->recv_cq);
-	int i, n = (hw_recv_cnt < sw_recv_cnt) ? hw_recv_cnt : sw_recv_cnt;
+	int i;
+
+	if (hw_recv_cnt < n)
+		n = hw_recv_cnt;
+
+	if (sw_recv_cnt < n)
+		n = sw_recv_cnt;
 
 	for (i = 0; i < n; i++) {
 		struct sk_buff *skb;
@@ -262,7 +268,7 @@ static int icenet_rx_poll(struct napi_struct *napi, int budget)
 	spin_lock(&nic->rx_lock);
 
 	completed = complete_recv(ndev, budget);
-	allocated = alloc_recv(ndev);
+	allocated = alloc_recv(ndev, completed);
 
 	spin_unlock(&nic->rx_lock);
 
@@ -333,7 +339,7 @@ static int icenet_open(struct net_device *ndev)
 	unsigned long flags;
 
 	spin_lock_irqsave(&nic->rx_lock, flags);
-	alloc_recv(ndev);
+	alloc_recv(ndev, CONFIG_ICENET_RING_SIZE);
 	spin_unlock_irqrestore(&nic->rx_lock, flags);
 
 	netif_start_queue(ndev);
