@@ -22,6 +22,9 @@
 #define ICENET_COUNTS 20
 #define ICENET_MACADDR 24
 #define ICENET_INTMASK 32
+#define ICENET_CKSUM_COUNTS 36
+#define ICENET_CKSUM_RESP 38
+#define ICENET_CKSUM_REQ 40
 
 #define ICENET_INTMASK_TX 1
 #define ICENET_INTMASK_RX 2
@@ -186,6 +189,7 @@ static int complete_recv(struct net_device *ndev, int budget)
 
 		skb->dev = ndev;
 		skb->protocol = eth_type_trans(skb, ndev);
+		skb->ip_summed = CHECKSUM_UNNECESSARY;
 		ndev->stats.rx_packets++;
 		ndev->stats.rx_bytes += len;
 		netif_receive_skb(skb);
@@ -364,12 +368,45 @@ static int icenet_stop(struct net_device *ndev)
 	return 0;
 }
 
+static void checksum_offload(struct icenet_device *nic, struct sk_buff *skb)
+{
+	void *start, *end;
+	uint64_t len, paddr, request;
+	uint16_t counts, result;
+	uint16_t *offset;
+
+	start = skb_checksum_start(skb);
+	end = skb_end_pointer(skb);
+
+	len = (uint64_t) (end - start);
+	paddr = virt_to_phys(start);
+	request = (len << 48) | (paddr & 0xffffffffffffL);
+
+	do {
+		counts = ioread16(nic->iomem + ICENET_CKSUM_COUNTS);
+	} while ((counts & 0xff) == 0);
+
+	iowrite64(request, nic->iomem + ICENET_CKSUM_REQ);
+
+	do {
+		counts = ioread16(nic->iomem + ICENET_CKSUM_COUNTS);
+	} while (((counts >> 8) & 0xff) == 0);
+
+	result = ioread16(nic->iomem + ICENET_CKSUM_RESP);
+	offset = start + skb->csum_offset;
+	*offset = result;
+	skb->ip_summed = CHECKSUM_NONE;
+}
+
 static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	unsigned long flags;
 
 	spin_lock_irqsave(&nic->tx_lock, flags);
+
+	if (skb->ip_summed == CHECKSUM_PARTIAL)
+		checksum_offload(nic, skb);
 
 	skb_tx_timestamp(skb);
 	post_send(nic, skb);
@@ -426,6 +463,9 @@ static int icenet_probe(struct platform_device *pdev)
 	ether_setup(ndev);
 	ndev->flags &= ~IFF_MULTICAST;
 	ndev->netdev_ops = &icenet_ops;
+	ndev->hw_features = (NETIF_F_RXCSUM | NETIF_F_HW_CSUM);
+	ndev->features = ndev->hw_features;
+	ndev->vlan_features = ndev->hw_features;
 
 	spin_lock_init(&nic->tx_lock);
 	spin_lock_init(&nic->rx_lock);
@@ -443,13 +483,17 @@ static int icenet_probe(struct platform_device *pdev)
 	if ((ret = icenet_parse_irq(ndev)) < 0)
 		return ret;
 
-	printk(KERN_INFO "Registered IceNet NIC %02x:%02x:%02x:%02x:%02x:%02x\n",
-			ndev->dev_addr[0],
-			ndev->dev_addr[1],
-			ndev->dev_addr[2],
-			ndev->dev_addr[3],
-			ndev->dev_addr[4],
-			ndev->dev_addr[5]);
+	printk(KERN_INFO "Registered IceNet NIC %02x:%02x:%02x:%02x:%02x:%02x: "
+			 "%d send queue size, "
+			 "%d recv queue size\n",
+		ndev->dev_addr[0],
+		ndev->dev_addr[1],
+		ndev->dev_addr[2],
+		ndev->dev_addr[3],
+		ndev->dev_addr[4],
+		ndev->dev_addr[5],
+		send_req_avail(nic),
+		recv_req_avail(nic));
 
 	return 0;
 }
