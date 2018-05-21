@@ -160,15 +160,18 @@ static void complete_send(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	struct sk_buff *skb;
+	int i, n;
 
-	while (send_comp_avail(nic) > 0) {
+	n = send_comp_avail(nic);
+
+	for (i = 0; i < n; i++) {
 		ioread16(nic->iomem + ICENET_SEND_COMP);
 		BUG_ON(SK_BUFF_CQ_COUNT(nic->send_cq) == 0);
 		skb = sk_buff_cq_pop(&nic->send_cq);
 
 		ndev->stats.tx_packets++;
 		ndev->stats.tx_bytes += skb->len;
-		dev_consume_skb_irq(skb);
+		dev_consume_skb_any(skb);
 	}
 }
 
@@ -227,6 +230,7 @@ static irqreturn_t icenet_tx_isr(int irq, void *data)
 {
 	struct net_device *ndev = data;
 	struct icenet_device *nic = netdev_priv(ndev);
+	int space;
 
 	if (irq != nic->tx_irq)
 		return IRQ_NONE;
@@ -234,10 +238,13 @@ static irqreturn_t icenet_tx_isr(int irq, void *data)
 	spin_lock(&nic->tx_lock);
 
 	complete_send(ndev);
-	clear_intmask(nic, ICENET_INTMASK_TX);
 
-	if (unlikely(netif_queue_stopped(ndev)))
+	space = send_space(nic);
+
+	if (space >= CONFIG_ICENET_TX_INTERRUPT_THRESHOLD) {
+		clear_intmask(nic, ICENET_INTMASK_TX);
 		netif_wake_queue(ndev);
+	}
 
 	spin_unlock(&nic->tx_lock);
 
@@ -402,6 +409,7 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	unsigned long flags;
+	int space;
 
 	spin_lock_irqsave(&nic->tx_lock, flags);
 
@@ -411,11 +419,18 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	skb_tx_timestamp(skb);
 	post_send(nic, skb);
 
-	if (send_space(nic) < CONFIG_ICENET_TX_THRESHOLD)
-		set_intmask(nic, ICENET_INTMASK_TX);
+	space = send_space(nic);
 
-	if (unlikely(send_space(nic) == 0))
+	if (space < CONFIG_ICENET_TX_CLEANUP_THRESHOLD) {
+		complete_send(ndev);
+		space = send_space(nic);
+	}
+
+	if (space < CONFIG_ICENET_TX_INTERRUPT_THRESHOLD) {
+		printk(KERN_WARNING "TX buffer out of space: enabling interrupts\n");
+		set_intmask(nic, ICENET_INTMASK_TX);
 		netif_stop_queue(ndev);
+	}
 
 	spin_unlock_irqrestore(&nic->tx_lock, flags);
 
