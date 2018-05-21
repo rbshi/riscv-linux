@@ -230,10 +230,11 @@ static irqreturn_t icenet_tx_isr(int irq, void *data)
 	spin_lock(&nic->tx_lock);
 
 	complete_send(ndev);
-	clear_intmask(nic, ICENET_INTMASK_TX);
 
-	if (unlikely(netif_queue_stopped(ndev)))
+	if (send_space(nic) >= CONFIG_ICENET_TX_THRESHOLD) {
+		clear_intmask(nic, ICENET_INTMASK_TX);
 		netif_wake_queue(ndev);
+	}
 
 	spin_unlock(&nic->tx_lock);
 
@@ -374,11 +375,16 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	skb_tx_timestamp(skb);
 	post_send(nic, skb);
 
-	if (send_space(nic) < CONFIG_ICENET_TX_THRESHOLD)
-		set_intmask(nic, ICENET_INTMASK_TX);
-
-	if (unlikely(send_space(nic) == 0))
-		netif_stop_queue(ndev);
+	if (send_space(nic) < CONFIG_ICENET_TX_THRESHOLD) {
+		// Try to clear some space
+		complete_send(ndev);
+		// If not enough was cleared, stop the queue and set TX interrupts
+		if (send_space(nic) < CONFIG_ICENET_TX_THRESHOLD) {
+			printk(KERN_WARNING "TX buffer out of space: enabling interrupts\n");
+			netif_stop_queue(ndev);
+			set_intmask(nic, ICENET_INTMASK_TX);
+		}
+	}
 
 	spin_unlock_irqrestore(&nic->tx_lock, flags);
 
