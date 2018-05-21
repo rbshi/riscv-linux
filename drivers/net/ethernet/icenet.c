@@ -157,15 +157,18 @@ static void complete_send(struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	struct sk_buff *skb;
+	int i, n;
 
-	while (send_comp_avail(nic) > 0) {
+	n = send_comp_avail(nic);
+
+	for (i = 0; i < n; i++) {
 		ioread16(nic->iomem + ICENET_SEND_COMP);
 		BUG_ON(SK_BUFF_CQ_COUNT(nic->send_cq) == 0);
 		skb = sk_buff_cq_pop(&nic->send_cq);
 
 		ndev->stats.tx_packets++;
 		ndev->stats.tx_bytes += skb->len;
-		dev_consume_skb_irq(skb);
+		dev_consume_skb_any(skb);
 	}
 }
 
