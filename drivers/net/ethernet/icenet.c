@@ -74,7 +74,7 @@ static inline struct sk_buff *sk_buff_cq_pop(struct sk_buff_cq *cq)
 	return skb;
 }
 
-static inline struct sk_buff *sk_buff_cq_tail_nsegments(struct sk_buff_cq *cq)
+static inline int sk_buff_cq_tail_nsegments(struct sk_buff_cq *cq)
 {
 	struct sk_buff *skb;
 
@@ -418,27 +418,41 @@ static int icenet_stop(struct net_device *ndev)
 static void checksum_offload(struct icenet_device *nic, struct sk_buff *skb)
 {
 	void *start, *end;
-	uint64_t len, paddr, request;
+	uint64_t i, len, partial, paddr, request;
 	uint16_t counts, result;
 	uint16_t *offset;
-
-	if (skb_shinfo(skb)->nr_frags > 0) {
-		skb_checksum_help(skb);
-		return;
-	}
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
 
 	start = skb_checksum_start(skb);
-	end = skb_end_pointer(skb);
+
+	if (shinfo->nr_frags > 0) {
+		end = skb->data + skb_headlen(skb);
+		partial = 1;
+	} else {
+		end = skb_end_pointer(skb);
+		partial = 0;
+	}
 
 	len = (uint64_t) (end - start);
 	paddr = virt_to_phys(start);
-	request = (len << 48) | (paddr & 0xffffffffffffL);
+	BUG_ON(paddr >= (1L << 48));
+	request = (partial << 63) | (len << 48) | paddr;
 
 	do {
 		counts = ioread16(nic->iomem + ICENET_CKSUM_COUNTS);
-	} while ((counts & 0xff) == 0);
+	} while ((counts & 0xff) < (shinfo->nr_frags + 1));
 
 	iowrite64(request, nic->iomem + ICENET_CKSUM_REQ);
+
+	for (i = 0; i < shinfo->nr_frags; i++) {
+		skb_frag_t *frag = &shinfo->frags[i];
+		partial = i < (shinfo->nr_frags - 1);
+		len = frag->size;
+		paddr = page_to_phys(frag->page.p) + frag->page_offset;
+		BUG_ON(paddr >= (1L << 48));
+		request = (partial << 63) | (len << 48) | paddr;
+		iowrite64(request, nic->iomem + ICENET_CKSUM_REQ);
+	}
 
 	do {
 		counts = ioread16(nic->iomem + ICENET_CKSUM_COUNTS);
