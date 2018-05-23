@@ -278,13 +278,13 @@ static irqreturn_t icenet_tx_isr(int irq, void *data)
 	spin_lock(&nic->tx_lock);
 
 	complete_send(ndev);
-
 	space = send_space(nic);
 
-	if (space >= CONFIG_ICENET_TX_INTERRUPT_THRESHOLD) {
+	if (space >= CONFIG_ICENET_TX_INTERRUPT_THRESHOLD)
 		clear_intmask(nic, ICENET_INTMASK_TX);
+
+	if (space > 0 && netif_queue_stopped(ndev))
 		netif_wake_queue(ndev);
-	}
 
 	spin_unlock(&nic->tx_lock);
 
@@ -468,33 +468,41 @@ static int icenet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct icenet_device *nic = netdev_priv(ndev);
 	unsigned long flags;
-	int space;
+	int space, nsegs = skb_shinfo(skb)->nr_frags + 1;
+	int tx_err = 0;
 
 	spin_lock_irqsave(&nic->tx_lock, flags);
 
+	space = send_space(nic);
+
+	if (space < CONFIG_ICENET_TX_INTERRUPT_THRESHOLD)
+		set_intmask(nic, ICENET_INTMASK_TX);
+
+	if (space < nsegs) {
+		// Try to clear space first
+		complete_send(ndev);
+		space = send_space(nic);
+		// If we couldn't reclaim enough space, run the error handler
+		tx_err = space < nsegs;
+	}
+
+	if (tx_err) {
+		printk(KERN_WARNING "Not enough space in TX ring\n");
+		netif_stop_queue(ndev);
+		set_intmask(nic, ICENET_INTMASK_TX);
+		dev_kfree_skb_any(skb);
+		ndev->stats.tx_dropped++;
+		spin_unlock_irqrestore(&nic->tx_lock, flags);
+		return NETDEV_TX_BUSY;
+	}
+
 	if (skb->ip_summed == CHECKSUM_PARTIAL)
 		checksum_offload(nic, skb);
-
-	space = send_space(nic);
-	BUG_ON(space < skb_shinfo(skb)->nr_frags + 1);
 
 	skb_tx_timestamp(skb);
 	post_send(nic, skb);
 	ndev->stats.tx_packets++;
 	ndev->stats.tx_bytes += skb->len;
-
-	space = send_space(nic);
-
-	if (space < CONFIG_ICENET_TX_CLEANUP_THRESHOLD) {
-		complete_send(ndev);
-		space = send_space(nic);
-	}
-
-	if (space < CONFIG_ICENET_TX_INTERRUPT_THRESHOLD) {
-		printk(KERN_WARNING "TX buffer out of space: enabling interrupts\n");
-		set_intmask(nic, ICENET_INTMASK_TX);
-		netif_stop_queue(ndev);
-	}
 
 	spin_unlock_irqrestore(&nic->tx_lock, flags);
 
@@ -550,6 +558,7 @@ static int icenet_probe(struct platform_device *pdev)
 	spin_lock_init(&nic->rx_lock);
 	sk_buff_cq_init(&nic->send_cq);
 	sk_buff_cq_init(&nic->recv_cq);
+
 	if ((ret = icenet_parse_addr(ndev)) < 0)
 		return ret;
 

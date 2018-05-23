@@ -90,10 +90,6 @@ config ICENET
 	default y
 
 if ICENET
-	config ICENET_TX_CLEANUP_THRESHOLD
-		int "IceNet TX cleanup threshold"
-		default 64
-
 	config ICENET_TX_INTERRUPT_THRESHOLD
 		int "IceNet TX interrupt threshold"
 		default 64
