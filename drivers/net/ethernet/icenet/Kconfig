@@ -1,0 +1,20 @@
+menuconfig ICENET
+	tristate "IceNet Ethernet NIC (RISC-V)"
+	depends on HAS_IOMEM && HAS_DMA
+	default y
+
+if ICENET
+	config ICENET_TX_INTERRUPT_THRESHOLD
+		int "IceNet TX interrupt threshold"
+		default 64
+
+	config ICENET_RX_BUDGET
+		int "IceNet RX poll budget"
+		default 64
+
+	config ICENET_RING_SIZE
+		int "IceNet DMA ring size"
+		default 64
+endif # ICENET
+
+

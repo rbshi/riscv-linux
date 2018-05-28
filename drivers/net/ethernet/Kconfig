@@ -80,28 +80,10 @@ source "drivers/net/ethernet/hisilicon/Kconfig"
 source "drivers/net/ethernet/hp/Kconfig"
 source "drivers/net/ethernet/huawei/Kconfig"
 source "drivers/net/ethernet/ibm/Kconfig"
+source "drivers/net/ethernet/icenet/Kconfig"
 source "drivers/net/ethernet/intel/Kconfig"
 source "drivers/net/ethernet/i825xx/Kconfig"
 source "drivers/net/ethernet/xscale/Kconfig"
-
-config ICENET
-	tristate "IceNet Ethernet NIC (RISC-V)"
-	depends on HAS_IOMEM && HAS_DMA
-	default y
-
-if ICENET
-	config ICENET_TX_INTERRUPT_THRESHOLD
-		int "IceNet TX interrupt threshold"
-		default 64
-
-	config ICENET_RX_BUDGET
-		int "IceNet RX poll budget"
-		default 64
-
-	config ICENET_RING_SIZE
-		int "IceNet DMA ring size"
-		default 64
-endif # ICENET
 
 config JME
 	tristate "JMicron(R) PCI-Express Gigabit Ethernet support"
