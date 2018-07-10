@@ -14,9 +14,7 @@
 #include <linux/device.h>
 
 #define RMEM_NAME "remote-memory"
-
 #define RMEM_IOCTRANS 0
-#define NPAGES 32
 
 struct rmem_info {
 	struct device *dev;
