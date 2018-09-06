@@ -42,6 +42,10 @@
 Module.symvers
 modules.builtin
 
+# keep the config for riscv
+!.config
+
+
 #
 # Top-level generic files
 #

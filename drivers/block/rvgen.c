@@ -306,4 +306,4 @@ static struct platform_driver generic_blkdev_driver = {
 	.probe = generic_blkdev_probe,
 	.remove = generic_blkdev_remove,
 };
-builtin_platform_driver(generic_blkdev_driver);
+// builtin_platform_driver(generic_blkdev_driver);
